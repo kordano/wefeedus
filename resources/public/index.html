@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html;charset=UTF-8">
+    <meta name="viewport" content="initial-scale=1.0, user-scalable=no, width=device-width">
+
+    <title>wefeedus</title>
+
+    <!-- Latest compiled and minified CSS -->
+    <link rel="stylesheet" href="http://netdna.bootstrapcdn.com/bootstrap/3.1.1/css/bootstrap.min.css">
+    <!-- css Datepicker and Timepicker -->
+    <link rel="stylesheet" href="css/datepicker3.css">
+    <link href="css/bootstrap-timepicker.css" rel="stylesheet">
+    <link rel="stylesheet" href="http://ol3js.org/en/master/css/ol.css" type="text/css">
+
+
+    <!-- Optional theme -->
+    <link rel="stylesheet" href="http://netdna.bootstrapcdn.com/bootstrap/3.1.1/css/bootstrap-theme.min.css">
+
+    <!-- Font awesome -->
+    <link rel="stylesheet" href="http://netdna.bootstrapcdn.com/font-awesome/4.0.3/css/font-awesome.css">
+
+    <!-- Latest compiled and minified JavaScript -->
+    <script src="//code.jquery.com/jquery-2.1.0.min.js"></script>
+    <script src="http://netdna.bootstrapcdn.com/bootstrap/3.1.1/js/bootstrap.min.js"></script>
+
+    <!--Datpicker -->
+    <script type="text/javascript" src="js/moment.js"></script>
+    <script type="text/javascript" src="js/bootstrap-datepicker.js"></script>
+    <script type="text/javascript" src="js/bootstrap-timepicker.js"></script>
+
+
+
+
+    <script type="text/javascript">
+      $(function () {
+      $('#datepicker').datepicker({
+      autoclose: true,
+      todayHighlight: true
+      });
+
+      $('#timepicker1').timepicker({
+      minuteStep: 15,
+      showInputs: false,
+      showMeridian: false,
+      defaultTime: false,
+      disableFocus: true
+      });
+ $('#timepicker2').timepicker({
+      minuteStep: 15,
+      showInputs: false,
+      showMeridian: false,
+      defaultTime: false,
+      disableFocus: true
+      });
+      });
+    </script>
+
+
+    <style>
+      div.map {
+      background-color: #E3F6CE;
+      padding-top: 20px;
+      padding-bottom: 20px;
+
+
+      }
+
+      div.timeline{
+      background-color: #E3F6CE;
+      padding-top: 20px;
+      padding-bottom: 20px;
+      margin-top: 40px;
+
+      }
+      div.right-inner {
+      position: relative;
+      }
+      div.right-inner input {
+      padding-right: 30px;
+      }
+
+      #button {
+      position: absolute;
+      right: 0px;
+      padding: 6px 12px;
+      font-size: 14px;
+      border-radius: 4px;
+      cursor: pointer;
+
+      }
+
+    </style>
+  </head>
+
+
+  <body>
+
+    <div class="container">
+      <div class="row">
+        <div class="col-md-offset-2 col-xs-12 col-md-10 timeline">
+
+          <form form="form-horizontal">
+              <div class="container">
+
+                <div class="col-md-3 input-append">
+                  <div class="input-group date" id="datepicker">
+                    <input type="text" class="form-control" placeholder="Datum"/>
+                    <span class="btn btn-default input-group-addon">
+                      <span class="glyphicon glyphicon-calendar">
+                      </span>
+                    </span>
+                  </div>
+                </div>
+
+
+                <div class="col-md-3 input-append bootstrap-timepicker">
+                  <div class="right-inner" id="timepicker1">
+                    <span class="btn btn-default add-on" id="button">
+                      <span class="glyphicon glyphicon-time">
+                      </span>
+                    </span>
+                    <input class="form-control" type="text" placeholder="Startzeit"/>
+                  </div>
+                </div>
+
+
+
+                <div class="col-md-3 input-append bootstrap-timepicker">
+                  <div class="right-inner" id="timepicker2">
+                    <span class="btn btn-default add-on" id="button">
+                      <span class="glyphicon glyphicon-time">
+                      </span>
+                    </span>
+                    <input class="form-control" type="text" placeholder="Endzeit"/>
+                  </div>
+                </div>
+              </div>
+          </form>
+
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col-md-offset-2 col-xs-12 col-md-10 map">
+          <div id="map">
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+  <!--Map -->
+    <script src="http://ol3js.org/en/master/build/ol.js" type="text/javascript"></script>
+    <script src="http://fb.me/react-0.9.0.min.js"></script>
+
+    <script src="js/compiled/out/goog/base.js" type="text/javascript"></script>
+    <script type="text/javascript" src="js/compiled/main.js"></script>
+    <script type="text/javascript">goog.require("wefeedus.core");</script>
+
+  </body>
+
+</html>
