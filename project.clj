@@ -9,6 +9,8 @@
 
   :dependencies [[org.clojure/clojure "1.6.0"]
                  [org.clojure/clojurescript "0.0-2227"]
+                 #_[org.clojure/core.async "0.1.0-SNAPSHOT"]
+                 [org.clojure/core.async "0.1.303.0-886421-alpha"]
 
                  [log4j/log4j "1.2.17" :exclusions [javax.mail/mail javax.jms/jms com.sun.jdmk/jmxtools com.sun.jmx/jmxri]]
                  [org.slf4j/slf4j-log4j12 "1.7.6"]

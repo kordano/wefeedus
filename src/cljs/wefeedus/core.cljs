@@ -73,17 +73,31 @@
                             "master"))))
 
 
+(def position (atom [8.82 51.42]))
+
+(go-loop []
+  (<! (timeout (* 60 1000)))
+  (.getCurrentPosition
+   (.. js/window -navigator -geolocation)
+   (fn [pos] (let [coords (.-coords pos)
+                  lon (.-longitude coords)
+                  lat (.-latitude coords)]
+              (println "You are at " lon "-" lat)
+              (reset! position [lon lat])))
+   #(do (js/alert "Could not fetch your geo position.")))
+  (recur))
+
+
 (defn add-marker [stage e]
   (let [marker-id (uuid)
         ts (js/Date.)
-        pos [2 2]
         user (get-in @stage [:config :user])]
     (go (<! (s/transact stage
                         ["eve@polyc0l0r.net"
                          #uuid "98bac5ab-7e88-45c2-93e6-831654b9bff4"
                          "master"]
                         [{:db/id marker-id
-                          :pos pos
+                          :pos @position
                           :user user
                           :ts ts}]
                         '(fn [old params]
@@ -91,9 +105,6 @@
         (<! (s/commit! stage
                        {"eve@polyc0l0r.net"
                         {#uuid "98bac5ab-7e88-45c2-93e6-831654b9bff4" #{"master"}}})))))
-
-#_(add-marker stage {})
-
 
 
 ;; only needed to read initial value
@@ -124,7 +135,6 @@
                             #{"master"}}}))
 
 
-  #_(<! (timeout 500))
 
 
   #_(<! (s/connect! stage "ws://localhost:8080/geschichte/ws"))
@@ -154,6 +164,11 @@
                                                                          "EPSG:4326"
                                                                          "EPSG:3857"))
                                            :user user})))))))
+
+
+  (<! (timeout 500))
+
+  (add-marker stage nil)
 
   #_(om/root
      (fn [stage-cursor owner]
