@@ -126,8 +126,6 @@
 
   (def stage (<! (s/create-stage! "eve@polyc0l0r.net" peer eval-fn)))
 
-  #_(get-in @stage [:volatile :val "eve@polyc0l0r.net"])
-
 
   (<! (s/subscribe-repos! stage
                           {"eve@polyc0l0r.net"
@@ -139,13 +137,12 @@
 
   #_(<! (s/connect! stage "ws://localhost:8080/geschichte/ws"))
 
-  (add-watch stage :marker-update
+  (add-watch (-> @stage :volatile :val-atom) :marker-update
              (fn [k a o new]
                (doseq [f (.getFeatures markers-source)]
                  (.removeFeature markers-source f))
                (let [db (get-in new
-                                [:volatile :val
-                                 "eve@polyc0l0r.net"
+                                ["eve@polyc0l0r.net"
                                  #uuid "98bac5ab-7e88-45c2-93e6-831654b9bff4"
                                  "master"])
                      qr (sort-by :ts
@@ -197,7 +194,7 @@
 (comment
   (get-in @stage ["eve@polyc0l0r.net" #uuid "b09d8708-352b-4a71-a845-5f838af04116"])
 
-  (get-in @stage [:volatile :val])
+  (get-in @stage [:volatile :val-atom])
 
 
   [{:user "jane"
