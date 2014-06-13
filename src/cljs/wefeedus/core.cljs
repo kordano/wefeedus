@@ -76,28 +76,32 @@
 (def position (atom [8.82 51.42]))
 
 (go-loop []
-  (<! (timeout (* 60 1000)))
   (.getCurrentPosition
    (.. js/window -navigator -geolocation)
    (fn [pos] (let [coords (.-coords pos)
                   lon (.-longitude coords)
                   lat (.-latitude coords)]
               (println "You are at " lon "-" lat)
-              (reset! position [lon lat])))
+              (reset! position [lon lat])
+              (.setCenter (.getView geo-map) (clj->js (ol.proj.transform #js [lon lat]
+                                                                        "EPSG:4326"
+                                                                        "EPSG:3857")))))
    #(do (js/alert "Could not fetch your geo position.")))
+  (<! (timeout (* 60 60 1000)))
   (recur))
 
 
-(defn add-marker [stage e]
+(defn add-marker [user lon lat meal-type]
   (let [marker-id (uuid)
-        ts (js/Date.)
-        user (get-in @stage [:config :user])]
+        ts (js/Date.)]
     (go (<! (s/transact stage
                         ["eve@polyc0l0r.net"
                          #uuid "98bac5ab-7e88-45c2-93e6-831654b9bff4"
                          "master"]
                         [{:db/id marker-id
-                          :pos @position
+                          :lon lon
+                          :lat lat
+                          :meal-type meal-type
                           :user user
                           :ts ts}]
                         '(fn [old params]
@@ -126,18 +130,9 @@
 
   (def stage (<! (s/create-stage! "eve@polyc0l0r.net" peer eval-fn)))
 
+  (def stage-val (-> @stage :volatile :val-atom))
 
-  (<! (s/subscribe-repos! stage
-                          {"eve@polyc0l0r.net"
-                           {#uuid "98bac5ab-7e88-45c2-93e6-831654b9bff4"
-                            #{"master"}}}))
-
-
-
-
-  #_(<! (s/connect! stage "ws://localhost:8080/geschichte/ws"))
-
-  (add-watch (-> @stage :volatile :val-atom) :marker-update
+  (add-watch stage-val :marker-update
              (fn [k a o new]
                (doseq [f (.getFeatures markers-source)]
                  (.removeFeature markers-source f))
@@ -146,52 +141,95 @@
                                  #uuid "98bac5ab-7e88-45c2-93e6-831654b9bff4"
                                  "master"])
                      qr (sort-by :ts
-                                 (map (partial zipmap [:id :pos :user :ts])
-                                      (d/q '[:find ?m ?pos ?user ?ts
+                                 (map (partial zipmap [:id :lon :lat :user :meal-type :ts])
+                                      (d/q '[:find ?m ?lon ?lat ?user ?meal-type ?ts
                                              :where
                                              [?m :user ?user]
-                                             [?m :pos ?pos]
+                                             [?m :lon ?lon]
+                                             [?m :lat ?lat]
+                                             [?m :meal-type ?meal-type]
                                              [?m :ts ?ts]]
                                            db)))]
-                 (doseq [{:keys [pos user]} qr]
-                   (.addFeature markers-source
-                                (ol.Feature.
-                                 (clj->js {:geometry (ol.geom.Point.
-                                                      (ol.proj.transform (clj->js pos)
-                                                                         "EPSG:4326"
-                                                                         "EPSG:3857"))
-                                           :user user})))))))
+                 (doseq [{:keys [lon lat user meal-type]} qr]
+                   (let [feat (ol.Feature. #js {:geometry (ol.geom.Point.
+                                                           (ol.proj.transform #js [lon lat]
+                                                                              "EPSG:4326"
+                                                                              "EPSG:3857"))
+                                                :user user})
+                         icon (ol.style.Icon. #js {:anchor #js [0.5, 46]
+                                                   :anchorXUnits "fraction"
+                                                   :anchorYUnits "pixels"
+                                                   :opacity 0.9
+                                                   :src (str "img/" (name meal-type) ".png")})
+                         style (ol.style.Style. #js {:image icon})]
+                     (.setStyle feat style)
+                     (.addFeature markers-source feat))))))
+
+  #_(<! (s/connect! stage "ws://localhost:8080/geschichte/ws"))
+
+  (<! (s/subscribe-repos! stage
+                          {"eve@polyc0l0r.net"
+                           {#uuid "98bac5ab-7e88-45c2-93e6-831654b9bff4"
+                            #{"master"}}}))
 
 
-  (<! (timeout 500))
+  (add-watch stage-val :add-one
+             (fn [k a o new]
+               (remove-watch a k)
+               (let [user (get-in @stage [:config :user])]
+                 (doseq [{:keys [lon lat meal-type]}
+                         [{:lon 8.485 :lat 49.455 :meal-type :soup}
+                          {:lon 8.491 :lat 49.451 :meal-type :lunch}
+                          {:lon 8.494 :lat 49.458 :meal-type :cake}]]
+                   (add-marker user lon lat meal-type))))))
 
-  (add-marker stage nil)
 
-  #_(om/root
-     (fn [stage-cursor owner]
-       (om/component
-        (main-view
-         (let [db (get-in @stage
-                          [:volatile :val
-                           "eve@polyc0l0r.net"
-                           #uuid "98bac5ab-7e88-45c2-93e6-831654b9bff4"
-                           "master"])
-               qr (sort-by :ts
-                           (map (partial zipmap [:id :pos :user :ts])
-                                (d/q '[:find ?m ?pos ?user ?ts
-                                       :where
-                                       [?m :user ?user]
-                                       [?m :pos ?pos]
-                                       [?m :ts ?ts]]
-                                     db)))]
-           qr)
-         (partial add-marker stage))))
-     stage
-     {:target (. js/document (getElementById "main-container"))}))
+
+
+
+
+
+
+
+
+
+
+
 
 
 
 (comment
+  (let [user "eve"]
+    (doseq [{:keys [lon lat meal-type]}
+            [{:lon 8.485 :lat 49.455 :meal-type :soup}
+             {:lon 8.491 :lat 49.451 :meal-type :lunch}
+             {:lon 8.494 :lat 49.458 :meal-type :cake}]]
+      (println lon lat))
+    #_(add-marker user lon lat meal-type))
+
+  (let [db (get-in @stage-val
+                   ["eve@polyc0l0r.net"
+                    #uuid "98bac5ab-7e88-45c2-93e6-831654b9bff4"
+                    "master"])
+        qr (sort-by :ts
+                    (map (partial zipmap [:id :lon :lat :user :ts])
+                         (d/q '[:find ?m ?lon ?lat ?user ?ts
+                                :where
+                                [?m :user ?user]
+                                [?m :lon ?lon]
+                                [?m :lat ?lat]
+                                [?m :ts ?ts]]
+                              db)))]
+    qr
+    #_(doseq [{:keys [lon lat user]} qr]
+      (.addFeature markers-source
+                   (ol.Feature.
+                    (clj->js {:geometry (ol.geom.Point.
+                                         (ol.proj.transform (clj->js [lon lat])
+                                                            "EPSG:4326"
+                                                            "EPSG:3857"))
+                              :user user})))))
+
   (get-in @stage ["eve@polyc0l0r.net" #uuid "b09d8708-352b-4a71-a845-5f838af04116"])
 
   (get-in @stage [:volatile :val-atom])
@@ -298,5 +336,4 @@
                          #uuid "11e35eaf-b130-5817-b679-aae174b3dcfd"
                          [#uuid "24a37952-42e2-5ce0-bc74-b043bb92b374"]},
           :public false,
-          :pull-requests {}}}
-  )
+          :pull-requests {}}})
