@@ -1,9 +1,10 @@
 (ns wefeedus.core
-  (:require [domina :as dom]
+  (:require #_[domina :as dom]
             [figwheel.client :as figw :include-macros true]
             [weasel.repl :as ws-repl]
             [hasch.core :refer [uuid]]
             [datascript :as d]
+            [datascript.btset :as btset]
             [geschichte.stage :as s]
             [geschichte.sync :refer [client-peer]]
             [konserve.store :refer [new-mem-store]]
@@ -11,17 +12,16 @@
             [cljs.reader :refer [read-string] :as read]
             [kioo.om :refer [content set-attr do-> substitute listen]]
             [kioo.core :refer [handle-wrapper]]
-            [om.core :as om :include-macros true])
+            [om.core :as om :include-macros true]
+            [om.dom :as dom :include-macros true])
   (:require-macros [cljs.core.async.macros :refer [go go-loop]]))
 
 
 ;; TODO first prototype
 ;; - add clickable tooltip
-;; - add input dialog
 ;; - filter map
-;; - load marker icons
-
-(enable-console-print!)
+;; - add input dialog
+;; - load marker icons from server
 
 ;; fire up repl
 #_(do
@@ -31,32 +31,95 @@
         :repl-env (weasel.repl.websocket/repl-env
                    :ip "0.0.0.0" :port 17782)))
 
-
-(def markers-source (ol.source.Vector. (clj->js {:features []})))
-
-
-(def markers-layer (ol.layer.Vector. #js {:source markers-source}))
-
-
-(def geo-map (ol.Map. (clj->js {:target "map"
-                            :layers [(ol.layer.Tile.
-                                      (clj->js {:source (ol.source.OSM.)}))
-                                     markers-layer]
-                            :view (ol.View2D.
-                                   (clj->js {:center (ol.proj.transform #js [8.82 51.42]
-                                                                        "EPSG:4326"
-                                                                        "EPSG:3857")
-                                             :zoom 13}))})))
-
-
-
+(enable-console-print!)
 ;; todo
 ;; - load in templates
 
 (defn connect-repl []
   (figw/defonce conn (ws-repl/connect "ws://localhost:17782" :verbose true)))
 
-(.log js/console "HAIL TO THE LAMBDA!")
+(.log js/console "OIL UP!")
+
+
+
+(defn track-position! [position geo-map]
+  (go-loop []
+    (.getCurrentPosition
+     (.. js/window -navigator -geolocation)
+     (fn [pos] (let [coords (.-coords pos)
+                    lon (.-longitude coords)
+                    lat (.-latitude coords)]
+                (println "You are at " lon "-" lat)
+                (reset! position [lon lat])
+                (.setCenter (.getView geo-map) (clj->js (ol.proj.transform #js [lon lat]
+                                                                           "EPSG:4326"
+                                                                           "EPSG:3857")))))
+     #(do (js/alert "Could not fetch your geo position.")))
+    (<! (timeout (* 60 60 1000)))
+    (recur)))
+
+
+(defn map-view [app owner]
+  (reify
+    om/IInitState
+    (init-state [_]
+      (let [markers-source (ol.source.Vector. #js {:features #js []})
+            markers-layer (ol.layer.Vector. #js {:source markers-source})]
+        {:markers-source markers-source
+         :markers-layer markers-layer
+         :map-id (str (gensym))
+         :position (atom [0 0])}))
+
+    om/IDidMount
+    (did-mount [_]
+      (let [id (om/get-state owner :map-id)
+            markers (om/get-state owner :markers-layer)
+            position (om/get-state owner :position)
+            geo-map (ol.Map. (clj->js {:target id
+                                       :layers [(ol.layer.Tile. #js {:source (ol.source.OSM.)})
+                                                markers]
+                                       :view (ol.View2D. #js {:center (ol.proj.transform #js [8.82 51.42]
+                                                                                         "EPSG:4326"
+                                                                                         "EPSG:3857")
+                                                              :zoom 13})}))]
+        (om/set-state! owner :map geo-map)
+        (track-position! position geo-map)))
+
+    om/IRenderState
+    (render-state [this {:keys [map-id markers-source]}]
+      (let [db (om/value (get-in app ["eve@polyc0l0r.net"
+                                      #uuid "98bac5ab-7e88-45c2-93e6-831654b9bff4"
+                                      "master"]))]
+        (println "IRENDERSTATE" db)
+        (doseq [f (.getFeatures markers-source)]
+          (.removeFeature markers-source f))
+        (let [qr (sort-by :ts
+                          (map (partial zipmap [:id :lon :lat :user :meal-type :ts])
+                               (d/q '[:find ?m ?lon ?lat ?user ?meal-type ?ts
+                                      :where
+                                      [?m :user ?user]
+                                      [?m :lon ?lon]
+                                      [?m :lat ?lat]
+                                      [?m :meal-type ?meal-type]
+                                      [?m :ts ?ts]]
+                                    db)))]
+          #_(println "QR" qr)
+          (doseq [{:keys [lon lat user meal-type]} qr]
+            (let [feat (ol.Feature. #js {:geometry (ol.geom.Point.
+                                                    (ol.proj.transform #js [lon lat]
+                                                                       "EPSG:4326"
+                                                                       "EPSG:3857"))
+                                         :user user})
+                  icon (ol.style.Icon. #js {:anchor #js [0.5, 46]
+                                            :anchorXUnits "fraction"
+                                            :anchorYUnits "pixels"
+                                            :opacity 0.9
+                                            :src (str "img/" (name meal-type) ".png")})
+                  style (ol.style.Style. #js {:image icon})]
+              (.setStyle feat style)
+              (.addFeature markers-source feat)))))
+      (dom/div #js {:id map-id}))))
+
 
 (def eval-fn {'(fn replace [old params] params) (fn replace [old params] params)
               '(fn [old params]
@@ -64,34 +127,8 @@
               (fn [old params]
                 (:db-after (d/transact old params)))})
 
-#_(let [schema {:hashtags {:db/cardinality :db.cardinality/many}}
-        conn   (d/create-conn schema)]
-    (go (<! (s/create-repo! stage
-                            "eve@polyc0l0r.net"
-                            "wefeedus markers."
-                            @conn
-                            "master"))))
 
-
-(def position (atom [8.82 51.42]))
-
-(go-loop []
-  (.getCurrentPosition
-   (.. js/window -navigator -geolocation)
-   (fn [pos] (let [coords (.-coords pos)
-                  lon (.-longitude coords)
-                  lat (.-latitude coords)]
-              (println "You are at " lon "-" lat)
-              (reset! position [lon lat])
-              (.setCenter (.getView geo-map) (clj->js (ol.proj.transform #js [lon lat]
-                                                                        "EPSG:4326"
-                                                                        "EPSG:3857")))))
-   #(do (js/alert "Could not fetch your geo position.")))
-  (<! (timeout (* 60 60 1000)))
-  (recur))
-
-
-(defn add-marker [user lon lat meal-type]
+(defn add-marker [stage user lon lat meal-type]
   (let [marker-id (uuid)
         ts (js/Date.)]
     (go (<! (s/transact stage
@@ -110,10 +147,16 @@
                        {"eve@polyc0l0r.net"
                         {#uuid "98bac5ab-7e88-45c2-93e6-831654b9bff4" #{"master"}}})))))
 
+(defn read-db [{:keys [eavt aevt avet] :as m}]
+  (datascript/map->DB
+   (assoc m
+     :eavt (apply (partial btset/btset-by d/cmp-datoms-eavt) (seq eavt))
+     :aevt (apply (partial btset/btset-by d/cmp-datoms-aevt) (seq aevt))
+     :avet (apply (partial btset/btset-by d/cmp-datoms-avet) (seq avet)))))
 
 ;; only needed to read initial value
 ;; we can do this runtime wide here, since we only use this datascript version
-(read/register-tag-parser! 'datascript.DB datascript/map->DB)
+(read/register-tag-parser! 'datascript.DB read-db)
 (read/register-tag-parser! 'datascript.Datom datascript/map->Datom)
 
 
@@ -121,59 +164,27 @@
   (def store
     (<! (new-mem-store
          ;; empty db
-         (atom (read-string "{#uuid \"2c7fc39d-1fb9-547a-af42-3b3e5fcb9b8f\" {:transactions [[#uuid \"0c39ae5f-0984-56e3-86c8-0434783eb2dc\" #uuid \"123ed64b-1e25-59fc-8c5b-038636ae6c3d\"]], :parents [], :ts #inst \"2014-06-08T18:55:32.654-00:00\", :author \"eve@polyc0l0r.net\"}, #uuid \"0c39ae5f-0984-56e3-86c8-0434783eb2dc\" #datascript.DB{:schema {:hashtags {:db/cardinality :db.cardinality/many}}, :ea {}, :av {}, :max-eid 0, :max-tx 536870912}, #uuid \"123ed64b-1e25-59fc-8c5b-038636ae6c3d\" (fn replace [old params] params), \"eve@polyc0l0r.net\" {#uuid \"98bac5ab-7e88-45c2-93e6-831654b9bff4\" {:branches {\"master\" #{#uuid \"2c7fc39d-1fb9-547a-af42-3b3e5fcb9b8f\"}}, :id #uuid \"98bac5ab-7e88-45c2-93e6-831654b9bff4\", :description \"wefeedus markers.\", :head \"master\", :last-update #inst \"2014-06-08T18:55:32.654-00:00\", :schema {:type \"http://github.com/ghubber/geschichte\", :version 1}, :causal-order {#uuid \"2c7fc39d-1fb9-547a-af42-3b3e5fcb9b8f\" []}, :public false, :pull-requests {}}}}"))
+         (atom (read-string "{#uuid \"2595c848-430f-5a42-b385-8d77fb8d2bb7\" {:transactions [[#uuid \"2928d11d-cc7e-5cc4-ad2d-cc3132c0f726\" #uuid \"123ed64b-1e25-59fc-8c5b-038636ae6c3d\"]], :parents [], :ts #inst \"2014-06-14T21:34:05.618-00:00\", :author \"eve@polyc0l0r.net\"}, #uuid \"123ed64b-1e25-59fc-8c5b-038636ae6c3d\" (fn replace [old params] params), \"eve@polyc0l0r.net\" {#uuid \"98bac5ab-7e88-45c2-93e6-831654b9bff4\" {:branches {\"master\" #{#uuid \"2595c848-430f-5a42-b385-8d77fb8d2bb7\"}}, :id #uuid \"98bac5ab-7e88-45c2-93e6-831654b9bff4\", :description \"wefeedus markers.\", :head \"master\", :last-update #inst \"2014-06-14T21:34:05.618-00:00\", :schema {:type \"http://github.com/ghubber/geschichte\", :version 1}, :causal-order {#uuid \"2595c848-430f-5a42-b385-8d77fb8d2bb7\" []}, :public false, :pull-requests {}}}, #uuid \"2928d11d-cc7e-5cc4-ad2d-cc3132c0f726\" #datascript.DB{:schema {:marker {:db/cardinality :db.cardinality/many}}, :eavt #{}, :aevt #{}, :avet #{}, :max-eid 0, :max-tx 536870912}}"))
 
-         (atom  {'datascript.DB datascript/map->DB
+         (atom  {'datascript.DB read-db
                  'datascript.Datom datascript/map->Datom}))))
 
   (def peer (client-peer "CLIENT-PEER" store))
 
   (def stage (<! (s/create-stage! "eve@polyc0l0r.net" peer eval-fn)))
 
-  (def stage-val (-> @stage :volatile :val-atom))
-
-  (add-watch stage-val :marker-update
-             (fn [k a o new]
-               (doseq [f (.getFeatures markers-source)]
-                 (.removeFeature markers-source f))
-               (let [db (get-in new
-                                ["eve@polyc0l0r.net"
-                                 #uuid "98bac5ab-7e88-45c2-93e6-831654b9bff4"
-                                 "master"])
-                     qr (sort-by :ts
-                                 (map (partial zipmap [:id :lon :lat :user :meal-type :ts])
-                                      (d/q '[:find ?m ?lon ?lat ?user ?meal-type ?ts
-                                             :where
-                                             [?m :user ?user]
-                                             [?m :lon ?lon]
-                                             [?m :lat ?lat]
-                                             [?m :meal-type ?meal-type]
-                                             [?m :ts ?ts]]
-                                           db)))]
-                 (doseq [{:keys [lon lat user meal-type]} qr]
-                   (let [feat (ol.Feature. #js {:geometry (ol.geom.Point.
-                                                           (ol.proj.transform #js [lon lat]
-                                                                              "EPSG:4326"
-                                                                              "EPSG:3857"))
-                                                :user user})
-                         icon (ol.style.Icon. #js {:anchor #js [0.5, 46]
-                                                   :anchorXUnits "fraction"
-                                                   :anchorYUnits "pixels"
-                                                   :opacity 0.9
-                                                   :src (str "img/" (name meal-type) ".png")})
-                         style (ol.style.Style. #js {:image icon})]
-                     (.setStyle feat style)
-                     (.addFeature markers-source feat))))))
-
-  #_(<! (s/connect! stage "ws://localhost:8080/geschichte/ws"))
-
   (<! (s/subscribe-repos! stage
                           {"eve@polyc0l0r.net"
                            {#uuid "98bac5ab-7e88-45c2-93e6-831654b9bff4"
                             #{"master"}}}))
 
+  (om/root map-view (-> @stage :volatile :val-atom)
+         {:target (. js/document (getElementById "map"))})
 
-  (add-watch stage-val :add-one
+  #_(<! (s/connect! stage "ws://localhost:8080/geschichte/ws"))
+
+  ;; some dummy state
+  (add-watch (-> @stage :volatile :val-atom) :add-once
              (fn [k a o new]
                (remove-watch a k)
                (let [user (get-in @stage [:config :user])]
@@ -181,159 +192,14 @@
                          [{:lon 8.485 :lat 49.455 :meal-type :soup}
                           {:lon 8.491 :lat 49.451 :meal-type :lunch}
                           {:lon 8.494 :lat 49.458 :meal-type :cake}]]
-                   (add-marker user lon lat meal-type))))))
+                   (add-marker stage user lon lat meal-type))))))
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-(comment
-  (let [user "eve"]
-    (doseq [{:keys [lon lat meal-type]}
-            [{:lon 8.485 :lat 49.455 :meal-type :soup}
-             {:lon 8.491 :lat 49.451 :meal-type :lunch}
-             {:lon 8.494 :lat 49.458 :meal-type :cake}]]
-      (println lon lat))
-    #_(add-marker user lon lat meal-type))
-
-  (let [db (get-in @stage-val
-                   ["eve@polyc0l0r.net"
-                    #uuid "98bac5ab-7e88-45c2-93e6-831654b9bff4"
-                    "master"])
-        qr (sort-by :ts
-                    (map (partial zipmap [:id :lon :lat :user :ts])
-                         (d/q '[:find ?m ?lon ?lat ?user ?ts
-                                :where
-                                [?m :user ?user]
-                                [?m :lon ?lon]
-                                [?m :lat ?lat]
-                                [?m :ts ?ts]]
-                              db)))]
-    qr
-    #_(doseq [{:keys [lon lat user]} qr]
-      (.addFeature markers-source
-                   (ol.Feature.
-                    (clj->js {:geometry (ol.geom.Point.
-                                         (ol.proj.transform (clj->js [lon lat])
-                                                            "EPSG:4326"
-                                                            "EPSG:3857"))
-                              :user user})))))
-
-  (get-in @stage ["eve@polyc0l0r.net" #uuid "b09d8708-352b-4a71-a845-5f838af04116"])
-
-  (get-in @stage [:volatile :val-atom])
-
-
-  [{:user "jane"
-    :id 1
-    :title "How to get a Designer"
-    :detail-url "https://medium.com/coding-design/how-to-get-a-designer-b3afdf5a853d"
-    :detail-text "Just some thoughts ..."
-    :comments [{:text "awesome :D" :user "adam" :date "today"}]
-    :hashtags #{"#coding" "#design"}}
-   {:user "john"
-    :id 2
-    :title "Greenwald's 'No Place to Hide': a compelling, vital narrative about official criminality"
-    :detail-text "Interesting article"
-    :detail-url "http://boingboing.net/2014/05/28/greenwalds-no-place-to-hid.html"
-    :comments [{:text "lies, all lies ..." :user "adam" :date "yesterday"}
-               {:text "Sucker" :user "eve" :date "today"}]
-    :hashtags #{"#greenwald" "#snowden" "#nsa"}}]
-
-
-  (let [post-id (uuid)
-        comment-id1 (uuid)
-        ts (js/Date.)]
-    (go (<! (s/transact stage
-                        ["eve@polyc0l0r.net"
-                         #uuid "fc9f725a-20eb-42f1-bb27-80d6fb2d1945"
-                         "master"]
-                        [{:db/id post-id
-                          :title "Greenwald's 'No Place to Hide': a compelling, vital narrative about official criminality"
-                          :detail-text "Interesting article"
-                          :detail-url "http://boingboing.net/2014/05/28/greenwalds-no-place-to-hid.html"
-                          :user "jane"
-                          :ts ts}
-                         {:db/id comment-id1
-                          :post post-id
-                          :content "awesome :D"
-                          :user "adam"
-                          :date "today"}]
-                        '(fn [old params]
-                           (:db-after (d/transact old params)))))))
-
-  (map (partial zipmap [:id :title :detail-url :detail-text :user])
-       (d/q '[:find ?p ?title ?dtext ?durl ?user
-              :in $
-              :where
-              [?p :user ?user]
-              [?p :detail-url ?durl]
-              [?p :detail-text ?dtext]
-              [?p :title ?title]]
-            (get-in @stage [:volatile :val
+;; create new empty db in repo
+#_(let [schema {:marker {:db/cardinality :db.cardinality/many}}
+        conn   (d/create-conn schema)]
+    (go (<! (s/create-repo! stage
                             "eve@polyc0l0r.net"
-                            #uuid "b09d8708-352b-4a71-a845-5f838af04116"
-                            "master"])))
-
-  (d/q '[:find ?h ?tag
-         :in $
-         :where
-         [?h :tag ?tag]]
-       (get-in @stage [:volatile :val
-                       "eve@polyc0l0r.net"
-                       #uuid "b09d8708-352b-4a71-a845-5f838af04116"
-                       "master"]))
-
-  (d/q '[:find ?p (max 10 ?t)
-         :in $ ?amount
-         :where [?h :post ?p]
-         [?h :tag ?t]]
-       (get-in @stage [:volatile :val
-                       "eve@polyc0l0r.net"
-                       #uuid "b09d8708-352b-4a71-a845-5f838af04116"
-                       "master"]))
-
-  {:new-values {"master" {#uuid "11e35eaf-b130-5817-b679-aae174b3dcfd"
-                          {:transactions [[#uuid "253cff5f-11dd-5bf9-bc9b-3e8a0c842a0b" #uuid "1f70bf3a-1d08-5cfe-a143-ee0c6c377873"]],
-                           :ts #inst "2014-05-31T23:29:28.493-00:00",
-                           :parents [#uuid "24a37952-42e2-5ce0-bc74-b043bb92b374"],
-                           :author "eve@polyc0l0r.net"},
-                          #uuid "253cff5f-11dd-5bf9-bc9b-3e8a0c842a0b"
-                          ({:detail-url nil, :db/id #uuid "81cdc883-a1b3-4001-ba34-97f890aee7a9", :title "test6...", :ts #inst "2014-05-31T23:29:28.465-00:00", :detail-text "test6", :user "eve@polyc0l0r.net"}),
-                          #uuid "1f70bf3a-1d08-5cfe-a143-ee0c6c377873"
-                          '(fn [old params] (:db-after (d/transact old params)))}},
-   :transactions {"master" []},
-   :op :meta-pub,
-   :meta {:branches {"master" #{#uuid "11e35eaf-b130-5817-b679-aae174b3dcfd"}},
-          :id #uuid "b09d8708-352b-4a71-a845-5f838af04116",
-          :description "link-collective discourse.",
-          :head "master",
-          :last-update #inst "2014-05-31T23:29:28.493-00:00",
-          :schema {:type "http://github.com/ghubber/geschichte",
-                   :version 1},
-          :causal-order {#uuid "1e0604c9-a4dc-5b18-b1cc-6a75d4004364"
-                         [#uuid "1dab5501-9eb1-5631-a2dc-3040410765bf"],
-                         #uuid "1dab5501-9eb1-5631-a2dc-3040410765bf"
-                         [#uuid "2425a9dc-7ce8-56a6-9f52-f7c431afcd91"],
-                         #uuid "2425a9dc-7ce8-56a6-9f52-f7c431afcd91" [],
-                         #uuid "11e976a2-133c-5418-8d85-ebdaf643b7e8"
-                         [#uuid "1e0604c9-a4dc-5b18-b1cc-6a75d4004364"],
-                         #uuid "010b44d4-aace-5529-a535-588543f3f13c"
-                         [#uuid "11e976a2-133c-5418-8d85-ebdaf643b7e8"],
-                         #uuid "24a37952-42e2-5ce0-bc74-b043bb92b374"
-                         [#uuid "010b44d4-aace-5529-a535-588543f3f13c"],
-                         #uuid "11e35eaf-b130-5817-b679-aae174b3dcfd"
-                         [#uuid "24a37952-42e2-5ce0-bc74-b043bb92b374"]},
-          :public false,
-          :pull-requests {}}})
+                            "wefeedus markers."
+                            @conn
+                            "master"))))
