@@ -2,6 +2,7 @@
   (:require [figwheel.client :as fw :include-macros true]
             [kioo.om :refer [content set-attr do-> substitute listen prepend append html remove-class]]
             [kioo.core :refer [handle-wrapper]]
+            [cljs.core.async :refer [put!]]
             [om.core :as om :include-macros true]
             [om.dom :as dom :include-macros true])
   (:require-macros [kioo.om :refer [defsnippet deftemplate]]))
@@ -10,7 +11,7 @@
 
 (println "Resistance is futile!")
 
-(fw/watch-and-reload
+#_(fw/watch-and-reload
   ;; :websocket-url "ws://localhost:3449/figwheel-ws" default
  :jsload-callback (fn [] (print "reloaded"))) ;; optional callback
 
@@ -54,3 +55,10 @@
 (deftemplate main-view "main.html" [data add-post]
   {[:.list-group] (substitute (map #(link-item %) data))
    [:#send-button] (listen :onClick add-post)})
+
+
+(deftemplate app-view "public/index.html" [map-comp start-ts-ch end-ts-ch date-ch]
+  {[:#map] (substitute map-comp)
+   [:#start-time] (listen :onChange (fn [e] (put! start-ts-ch (.. e -target -value))))
+   [:#end-time] (listen :onChange (fn [e] (put! end-ts-ch (.. e -target -value))))
+   [:#date] (listen :onChange (fn [e] (put! date-ch (.. e -target -value))))})

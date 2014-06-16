@@ -1,5 +1,6 @@
 (ns wefeedus.core
   (:require #_[domina :as dom]
+            [wefeedus.view :refer [app-view]]
             [figwheel.client :as figw :include-macros true]
             [weasel.repl :as ws-repl]
             [hasch.core :refer [uuid]]
@@ -41,7 +42,6 @@
 (.log js/console "OIL UP!")
 
 
-
 (defn track-position! [position geo-map]
   (go-loop []
     (.getCurrentPosition
@@ -59,7 +59,24 @@
     (recur)))
 
 
-(defn map-view [app owner]
+(defn add-markers [markers-vector markers]
+  (doseq [{:keys [lon lat user meal-type]} markers]
+    (let [feat (ol.Feature. #js {:geometry (ol.geom.Point.
+                                            (ol.proj.transform #js [lon lat]
+                                                               "EPSG:4326"
+                                                               "EPSG:3857"))
+                                 :user user})
+          icon (ol.style.Icon. #js {:anchor #js [0.5, 46]
+                                    :anchorXUnits "fraction"
+                                    :anchorYUnits "pixels"
+                                    :opacity 0.9
+                                    :src (str "img/" (name meal-type) ".png")})
+          style (ol.style.Style. #js {:image icon})]
+      (.setStyle feat style)
+      (.addFeature markers-vector feat))))
+
+
+(defn map-view [map-id app owner]
   (reify
     om/IInitState
     (init-state [_]
@@ -67,7 +84,7 @@
             markers-layer (ol.layer.Vector. #js {:source markers-source})]
         {:markers-source markers-source
          :markers-layer markers-layer
-         :map-id (str (gensym))
+         :map-id map-id
          :position (atom [0 0])}))
 
     om/IDidMount
@@ -75,50 +92,62 @@
       (let [id (om/get-state owner :map-id)
             markers (om/get-state owner :markers-layer)
             position (om/get-state owner :position)
-            geo-map (ol.Map. (clj->js {:target id
-                                       :layers [(ol.layer.Tile. #js {:source (ol.source.OSM.)})
-                                                markers]
-                                       :view (ol.View2D. #js {:center (ol.proj.transform #js [8.82 51.42]
-                                                                                         "EPSG:4326"
-                                                                                         "EPSG:3857")
-                                                              :zoom 13})}))]
+            geo-map (ol.Map. #js {:target id
+                                  :layers #js [(ol.layer.Tile. #js {:source (ol.source.OSM.)})
+                                               markers]
+                                  :view (ol.View2D. #js {:center (ol.proj.transform #js [8.82 51.42]
+                                                                                    "EPSG:4326"
+                                                                                    "EPSG:3857")
+                                                         :zoom 13})})
+            start-ts-ch (om/get-state owner :start-ts-ch)
+            end-ts-ch (om/get-state owner :end-ts-ch)
+            date-ch (om/get-state owner :date-ch)]
         (om/set-state! owner :map geo-map)
         (track-position! position geo-map)))
 
     om/IRenderState
-    (render-state [this {:keys [map-id markers-source]}]
-      (let [db (om/value (get-in app ["eve@polyc0l0r.net"
-                                      #uuid "98bac5ab-7e88-45c2-93e6-831654b9bff4"
-                                      "master"]))]
-        (println "IRENDERSTATE" db)
+    (render-state [this {:keys [map-id markers-source date start-ts end-ts]}]
+      (let [db (om/value app)]
+        (println "IRENDERSTATE" date start-ts end-ts)
         (doseq [f (.getFeatures markers-source)]
           (.removeFeature markers-source f))
         (let [qr (sort-by :ts
-                          (map (partial zipmap [:id :lon :lat :user :meal-type :ts])
-                               (d/q '[:find ?m ?lon ?lat ?user ?meal-type ?ts
+                          (map (partial zipmap [:id :lon :lat :user :meal-type :ts :start :end])
+                               (d/q '[:find ?m ?lon ?lat ?user ?meal-type ?ts ?start ?end
                                       :where
                                       [?m :user ?user]
                                       [?m :lon ?lon]
                                       [?m :lat ?lat]
                                       [?m :meal-type ?meal-type]
-                                      [?m :ts ?ts]]
+                                      [?m :start-ts ?start]
+                                      [?m :end-ts ?end]
+                                      [?m :ts ?ts]
+                                      [(< ?start #inst "2014-06-15T09:00:01.000-00:00")]]
                                     db)))]
-          #_(println "QR" qr)
-          (doseq [{:keys [lon lat user meal-type]} qr]
-            (let [feat (ol.Feature. #js {:geometry (ol.geom.Point.
-                                                    (ol.proj.transform #js [lon lat]
-                                                                       "EPSG:4326"
-                                                                       "EPSG:3857"))
-                                         :user user})
-                  icon (ol.style.Icon. #js {:anchor #js [0.5, 46]
-                                            :anchorXUnits "fraction"
-                                            :anchorYUnits "pixels"
-                                            :opacity 0.9
-                                            :src (str "img/" (name meal-type) ".png")})
-                  style (ol.style.Style. #js {:image icon})]
-              (.setStyle feat style)
-              (.addFeature markers-source feat)))))
+          (add-markers markers-source qr)))
       (dom/div #js {:id map-id}))))
+
+
+(defn app [[user id br] stage owner]
+  (reify
+    om/IInitState
+    (init-state [_]
+      {:start-ts-ch (chan)
+       :end-ts-ch (chan)
+       :date-ch (chan)})
+    om/IDidMount
+    (did-mount [_]
+      (js/setupBootstrap))
+    om/IRenderState
+    (render-state [this {:keys [start-ts-ch end-ts-ch date-ch]}]
+      (app-view (om/build (partial map-view "map")
+                          (get-in stage [user id br])
+                          {:init-state {:start-ts-ch start-ts-ch
+                                        :end-ts-ch end-ts-ch
+                                        :date-ch date-ch}})
+                start-ts-ch
+                end-ts-ch
+                date-ch))))
 
 
 (def eval-fn {'(fn replace [old params] params) (fn replace [old params] params)
@@ -128,7 +157,7 @@
                 (:db-after (d/transact old params)))})
 
 
-(defn add-marker [stage user lon lat meal-type]
+(defn add-marker [stage user lon lat meal-type start end]
   (let [marker-id (uuid)
         ts (js/Date.)]
     (go (<! (s/transact stage
@@ -140,6 +169,8 @@
                           :lat lat
                           :meal-type meal-type
                           :user user
+                          :start-ts start
+                          :end-ts end
                           :ts ts}]
                         '(fn [old params]
                            (:db-after (d/transact old params)))))
@@ -178,8 +209,11 @@
                            {#uuid "98bac5ab-7e88-45c2-93e6-831654b9bff4"
                             #{"master"}}}))
 
-  (om/root map-view (-> @stage :volatile :val-atom)
-         {:target (. js/document (getElementById "map"))})
+  (om/root (partial app ["eve@polyc0l0r.net"
+                         #uuid "98bac5ab-7e88-45c2-93e6-831654b9bff4"
+                         "master"])
+           (-> @stage :volatile :val-atom)
+           {:target (. js/document (getElementById "core-app"))})
 
   #_(<! (s/connect! stage "ws://localhost:8080/geschichte/ws"))
 
@@ -188,11 +222,19 @@
              (fn [k a o new]
                (remove-watch a k)
                (let [user (get-in @stage [:config :user])]
-                 (doseq [{:keys [lon lat meal-type]}
-                         [{:lon 8.485 :lat 49.455 :meal-type :soup}
-                          {:lon 8.491 :lat 49.451 :meal-type :lunch}
-                          {:lon 8.494 :lat 49.458 :meal-type :cake}]]
-                   (add-marker stage user lon lat meal-type))))))
+                 (doseq [{:keys [lon lat meal-type start end]}
+                         [{:lon 8.485 :lat 49.455
+                           :meal-type :soup
+                           :start #inst "2014-06-15T09:00:00.000-00:00"
+                           :end #inst "2014-06-15T12:00:00.000-00:00"}
+                          {:lon 8.491 :lat 49.451 :meal-type :lunch
+                           :start #inst "2014-06-15T11:00:00.000-00:00"
+                           :end #inst "2014-06-15T16:00:00.000-00:00"}
+                          {:lon 8.494 :lat 49.458
+                           :meal-type :cake
+                           :start #inst "2014-06-15T18:00:00.000-00:00"
+                           :end #inst "2014-06-15T22:00:00.000-00:00"}]]
+                   (add-marker stage user lon lat meal-type start end))))))
 
 
 (comment
