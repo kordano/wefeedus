@@ -24,7 +24,8 @@
                  [enlive "1.1.5"]
                  [compojure "1.1.6"]
 
-                 [domina "1.0.2"]
+                 [jayq "2.5.1"]
+                 [enfocus "2.0.2"]
                  [datascript "0.1.5"]
                  [om "0.6.4"]
                  [kioo "0.4.0"]

@@ -1,6 +1,7 @@
 (ns wefeedus.core
   (:require #_[domina :as dom]
-            [wefeedus.view :refer [app-view]]
+            [jayq.core :refer [$]]
+            [wefeedus.view :refer [app-view map-popup]]
             [figwheel.client :as figw :include-macros true]
             [weasel.repl :as ws-repl]
             [hasch.core :refer [uuid]]
@@ -59,7 +60,9 @@
     (recur)))
 
 
-(defn add-markers [markers-vector markers]
+(defn add-markers! [markers-vector markers]
+  (doseq [f (.getFeatures markers-vector)]
+    (.removeFeature markers-vector f))
   (doseq [{:keys [lon lat user meal-type]} markers]
     (let [feat (ol.Feature. #js {:geometry (ol.geom.Point.
                                             (ol.proj.transform #js [lon lat]
@@ -99,18 +102,34 @@
                                                                                     "EPSG:4326"
                                                                                     "EPSG:3857")
                                                          :zoom 13})})
+            popupe (.getElementById js/document "map-popup")
+            popup (ol.Overlay. #js {:element popupe
+                                    :positioning "bottom-center"
+                                    :stop-event false})
             start-ts-ch (om/get-state owner :start-ts-ch)
             end-ts-ch (om/get-state owner :end-ts-ch)
             date-ch (om/get-state owner :date-ch)]
+        (.addOverlay geo-map popup)
         (om/set-state! owner :map geo-map)
-        (track-position! position geo-map)))
+        (om/set-state! owner :popup popup)
+        (track-position! position geo-map)
+        (.on geo-map "click"
+             (fn [e] (if-let [feat (.forEachFeatureAtPixel geo-map (.-pixel e) (fn [f l] f))]
+                      (do
+                        (.setPosition popup (.. feat getGeometry getCoordinates))
+                        (.popover ($ popupe) #js {:placement "top"
+                                                  :html true
+                                                  :content (map-popup (.get feat "user"))})
+                        (.info js/console #js {:placement "top"
+                                               :html true
+                                               :content (.get feat "user")})
+                        (.popover ($ popupe) "show"))
+                      (.popover ($ popupe) "destroy"))))))
 
     om/IRenderState
     (render-state [this {:keys [map-id markers-source date start-ts end-ts]}]
       (let [db (om/value app)]
         (println "IRENDERSTATE" date start-ts end-ts)
-        (doseq [f (.getFeatures markers-source)]
-          (.removeFeature markers-source f))
         (let [qr (sort-by :ts
                           (map (partial zipmap [:id :lon :lat :user :meal-type :ts :start :end])
                                (d/q '[:find ?m ?lon ?lat ?user ?meal-type ?ts ?start ?end
@@ -124,8 +143,9 @@
                                       [?m :ts ?ts]
                                       [(< ?start #inst "2014-06-15T09:00:01.000-00:00")]]
                                     db)))]
-          (add-markers markers-source qr)))
-      (dom/div #js {:id map-id}))))
+          (add-markers! markers-source qr)))
+      (dom/div #js {:id map-id}
+               (dom/div #js {:id "map-popup"})))))
 
 
 (defn app [[user id br] stage owner]
