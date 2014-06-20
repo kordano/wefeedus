@@ -29,36 +29,6 @@
     <script type="text/javascript" src="js/bootstrap-datepicker.js"></script>
     <script type="text/javascript" src="js/bootstrap-timepicker.js"></script>
 
-
-
-
-    <script type="text/javascript">
-      var setupBootstrap = function() {
-      $(function () {
-      $('#datepicker').datepicker({
-      autoclose: true,
-      todayHighlight: true
-      });
-
-      $('#timepicker1').timepicker({
-      minuteStep: 15,
-      showInputs: false,
-      showMeridian: false,
-      defaultTime: false,
-      disableFocus: true
-      });
- $('#timepicker2').timepicker({
-      minuteStep: 15,
-      showInputs: false,
-      showMeridian: false,
-      defaultTime: false,
-      disableFocus: true
-      });
-      });
-      }
-    </script>
-
-
     <style>
       div.map {
       background-color: #E3F6CE;
@@ -113,24 +83,24 @@
 
 
                 <div class="col-md-3 input-append bootstrap-timepicker">
-                  <div class="right-inner" id="timepicker1">
+                  <div class="right-inner" id="start-time">
                     <span class="btn btn-default add-on" id="button">
                       <span class="glyphicon glyphicon-time">
                       </span>
                     </span>
-                    <input id="start-time" class="form-control" type="text" placeholder="Startzeit"/>
+                    <input id="start-time-picker" class="form-control" type="text" placeholder="Startzeit"/>
                   </div>
                 </div>
 
 
 
                 <div class="col-md-3 input-append bootstrap-timepicker">
-                  <div class="right-inner" id="timepicker2">
+                  <div class="right-inner" id="end-time">
                     <span class="btn btn-default add-on" id="button">
                       <span class="glyphicon glyphicon-time">
                       </span>
                     </span>
-                    <input id="end-time" class="form-control" type="text" placeholder="Endzeit"/>
+                    <input id="end-time-pickes" class="form-control" type="text" placeholder="Endzeit"/>
                   </div>
                 </div>
               </div>

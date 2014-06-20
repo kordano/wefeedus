@@ -22,8 +22,8 @@
   [user]
   ["#popup-user"] (ef/content (or user "foo")))
 
-(deftemplate app-view "public/index.html" [map-comp start-ts-ch end-ts-ch date-ch]
+(deftemplate app-view "public/index.html" [map-comp]
   {[:#map] (substitute map-comp)
-   [:#start-time] (listen :onChange (fn [e] (put! start-ts-ch (.. e -target -value))))
-   [:#end-time] (listen :onChange (fn [e] (put! end-ts-ch (.. e -target -value))))
-   [:#date] (listen :onChange (fn [e] (put! date-ch (.. e -target -value))))})
+   [:#start-time] (listen :onChange (fn [e] (.log js/console "kioo changed date:" (.-date e))))
+   [:#end-time] (listen :onChange (fn [e] (.log js/console "kioo changed date:" (.-date e))))
+   [:#date] (listen :onChange (fn [e] (.log js/console "kioo changed date:" (.-date e))))})

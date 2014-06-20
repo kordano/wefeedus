@@ -1,12 +1,20 @@
-              <!-- Modal -->
+<html>
+   <head>
+    <meta title="generator" content="content" charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link id="bootstrap-css" rel="stylesheet" href="//netdna.bootstrapcdn.com/bootstrap/3.1.1/css/bootstrap.min.css"/>
+    <link id="bootstrap-theme-css" rel="stylesheet" href="//netdna.bootstrapcdn.com/bootstrap/3.1.1/css/bootstrap-theme.min.css"/>
+  </head>
+   <body>
+              <!-- popup -->
 
                   <div id="map-popup" class="modal-content">
 
                     <div class="modal-header">
                       <div class="bootstrap-dialog-close-button" data-dismiss="modal" style="display: block;">
                         <button class="close">x</button>
-                        <h4 id="popup-user">not-set</h4>
-                        <h4>Cannelloni Ricotta Spinat Füllung</h4>
+                        <h2 id="popup-user">not-set</h2>
+                        <h2>Cannelloni Ricotta Spinat Füllung</h2>
                       </div>
                     </div>
 
@@ -18,8 +26,7 @@
                           </p>
 
 
-                          <!-- Carousel
-============================-->
+                          <!-- Carousel ============================-->
 
                           <div id="myCarousel" class="carousel slide">
 
@@ -61,3 +68,22 @@
                     </div>
 
                   </div>
+
+                  <!-- popup end -->
+
+   <!-- primary input -->
+   <div class="input-group input-group-lg">
+     <textarea class="form-control" type="text" id="general-input-form" rows="2" style="resize:vertical;" placeholder="What do you think?"></textarea>
+    <!-- <input type="text" class="form-control" placeholder="Username"> -->
+     <span class="input-group-btn">
+       <button class="btn btn-default" type="button" id="send-button">
+         <span class="glyphicon glyphicon-send"></span>
+       </button>
+     </span>
+   </div>
+   <!-- primary input -->
+
+   <script src="//code.jquery.com/jquery-1.11.0.min.js"></script>
+   <script src="//netdna.bootstrapcdn.com/bootstrap/3.1.1/js/bootstrap.min.js"></script>
+   </body>
+</html>

@@ -69,7 +69,7 @@
                                                                "EPSG:4326"
                                                                "EPSG:3857"))
                                  :user user})
-          icon (ol.style.Icon. #js {:anchor #js [0.5, 46]
+          icon (ol.style.Icon. #js {:anchor #js [0.5, 0.5]
                                     :anchorXUnits "fraction"
                                     :anchorYUnits "pixels"
                                     :opacity 0.9
@@ -79,7 +79,7 @@
       (.addFeature markers-vector feat))))
 
 
-(defn map-view [map-id app owner]
+(defn map-view [app owner]
   (reify
     om/IInitState
     (init-state [_]
@@ -87,14 +87,18 @@
             markers-layer (ol.layer.Vector. #js {:source markers-source})]
         {:markers-source markers-source
          :markers-layer markers-layer
-         :map-id map-id
-         :position (atom [0 0])}))
+         :map-id "map"
+         :position (atom [0 0])
+         :start-ts (js/Date.)
+         :end-ts (js/Date. (+ (.getTime (js/Date.)) (* 6 60 60 1000)))}))
 
     om/IDidMount
     (did-mount [_]
       (let [id (om/get-state owner :map-id)
             markers (om/get-state owner :markers-layer)
             position (om/get-state owner :position)
+            start-ts-ch (om/get-state owner :start-ts-ch)
+            end-ts-ch (om/get-state owner :end-ts-ch)
             geo-map (ol.Map. #js {:target id
                                   :layers #js [(ol.layer.Tile. #js {:source (ol.source.OSM.)})
                                                markers]
@@ -102,37 +106,46 @@
                                                                                     "EPSG:4326"
                                                                                     "EPSG:3857")
                                                          :zoom 13})})
-            popupe (.getElementById js/document "map-popup")
-            popup (ol.Overlay. #js {:element popupe
-                                    :positioning "bottom-center"
-                                    :stop-event false})
+            popup (.getElementById js/document "map-popup")
+            popup-overlay (ol.Overlay. #js {:element popup
+                                            :positioning "bottom-center"
+                                            :stop-event false})
             start-ts-ch (om/get-state owner :start-ts-ch)
             end-ts-ch (om/get-state owner :end-ts-ch)
             date-ch (om/get-state owner :date-ch)]
-        (.addOverlay geo-map popup)
+        (go-loop [s (<! start-ts-ch)]
+          (.log js/console "setting start-ts" s)
+          (om/set-state! owner :start-ts s)
+          (recur (<! start-ts-ch)))
+        (go-loop [e (<! end-ts-ch)]
+          (.log js/console "setting end-ts" e)
+          (om/set-state! owner :end-ts e)
+          (recur (<! end-ts-ch)))
+        (.addOverlay geo-map popup-overlay)
         (om/set-state! owner :map geo-map)
-        (om/set-state! owner :popup popup)
+        (om/set-state! owner :popup popup-overlay)
         (track-position! position geo-map)
         (.on geo-map "click"
-             (fn [e] (if-let [feat (.forEachFeatureAtPixel geo-map (.-pixel e) (fn [f l] f))]
+             (fn [e] (if-let [feat (.forEachFeatureAtPixel geo-map (.-pixel e) (fn [feat lay] feat))]
                       (do
-                        (.setPosition popup (.. feat getGeometry getCoordinates))
-                        (.popover ($ popupe) #js {:placement "top"
-                                                  :html true
-                                                  :content (map-popup (.get feat "user"))})
+                        (.setPosition popup-overlay (.. feat getGeometry getCoordinates))
+                        (.popover ($ popup) #js {:placement "top"
+                                                 :html true
+                                                 :content (map-popup (.get feat "user"))})
                         (.info js/console #js {:placement "top"
                                                :html true
                                                :content (.get feat "user")})
-                        (.popover ($ popupe) "show"))
-                      (.popover ($ popupe) "destroy"))))))
+                        (.popover ($ popup) "show"))
+                      (.popover ($ popup) "destroy"))))))
 
     om/IRenderState
-    (render-state [this {:keys [map-id markers-source date start-ts end-ts]}]
+    (render-state [this {:keys [map-id markers-source start-ts end-ts]}]
       (let [db (om/value app)]
-        (println "IRENDERSTATE" date start-ts end-ts)
+        (println "IRENDERSTATE" start-ts end-ts)
         (let [qr (sort-by :ts
                           (map (partial zipmap [:id :lon :lat :user :meal-type :ts :start :end])
                                (d/q '[:find ?m ?lon ?lat ?user ?meal-type ?ts ?start ?end
+                                      :in $ $start-ts $end-ts %
                                       :where
                                       [?m :user ?user]
                                       [?m :lon ?lon]
@@ -141,8 +154,21 @@
                                       [?m :start-ts ?start]
                                       [?m :end-ts ?end]
                                       [?m :ts ?ts]
-                                      [(< ?start #inst "2014-06-15T09:00:01.000-00:00")]]
-                                    db)))]
+                                      [in-range ?start ?end $start-ts $end-ts]]
+                                    db start-ts end-ts
+                                    '[[(in-range ?start ?end ?start-ts ?end-ts)
+                                       [(> ?start ?start-ts)]
+                                       [(< ?start ?end-ts)]]
+                                      [(in-range ?start ?end ?start-ts ?end-ts)
+                                       [(> ?end ?start-ts)]
+                                       [(< ?end ?end-ts)]]
+                                      [(in-range ?start ?end ?start-ts ?end-ts)
+                                       [(> ?start ?start-ts)]
+                                       [(< ?end ?end-ts)]]
+                                      [(in-range ?start ?end ?start-ts ?end-ts)
+                                       [(< ?start ?start-ts)]
+                                       [(> ?end ?end-ts)]]])))]
+          #_(println "QR" qr)
           (add-markers! markers-source qr)))
       (dom/div #js {:id map-id}
                (dom/div #js {:id "map-popup"})))))
@@ -152,22 +178,66 @@
   (reify
     om/IInitState
     (init-state [_]
-      {:start-ts-ch (chan)
-       :end-ts-ch (chan)
-       :date-ch (chan)})
+      (let [d (js/Date.)]
+        {:start-ts-ch (chan)
+         :end-ts-ch (chan)
+         :date d
+         :start-time #js {:hour (.getHours d)
+                          :minutes (.getMinutes d)}
+         :end-time #js {:hour (inc (.getHours d))
+                        :minutes (.getMinutes d)}}))
     om/IDidMount
     (did-mount [_]
-      (js/setupBootstrap))
+      (let [start-ts-ch (om/get-state owner :start-ts-ch)
+            end-ts-ch (om/get-state owner :end-ts-ch)
+            update-fn (fn []
+                        (let [d (om/get-state owner :date)
+                              s (om/get-state owner :start-time)
+                              e (om/get-state owner :end-time)
+                              o (.getTimezoneOffset (js/Date.))
+                              st (+ (.getTime d)
+                                    (* 1000 60 60 (.-hours s))
+                                    (* 1000 60 (- (.-minutes s) o)))
+                              et (+ (.getTime d)
+                                    (* 1000 60 60 (.-hours e))
+                                    (* 1000 60 (- (.-minutes e) o)))]
+                          (.log js/console "updating " st et)
+                          (put! start-ts-ch (js/Date. st))
+                          (put! end-ts-ch (js/Date. et))))]
+        (.datepicker ($ :#datepicker)
+                     #js {:autoclose true
+                          :todayHighlight true})
+        (.on ($ :#datepicker)
+             "changeDate"
+             (fn [e]
+               (.log js/console "changed date:" (.-date e))
+               (om/set-state! owner :date (.-date e))
+               (update-fn)))
+        (.timepicker ($ :#start-time)
+                     #js {:minuteStep 15
+                          :showMeridian false})
+        (.on ($ :#start-time)
+             "changeTime.timepicker"
+             (fn [e] (.log js/console "start-time changed:" (.-time e))
+               (om/set-state! owner :start-time (.-time e))
+               (update-fn)))
+
+        (.timepicker ($ :#end-time)
+                     #js {:minuteStep 15
+                          :showMeridian false})
+        (.on ($ :#end-time)
+             "changeTime.timepicker"
+             (fn [e] (.log js/console "end-time changed:" (.-time e))
+               (om/set-state! owner :end-time (.-time e))
+               (update-fn)))
+        (update-fn)))
+
     om/IRenderState
-    (render-state [this {:keys [start-ts-ch end-ts-ch date-ch]}]
-      (app-view (om/build (partial map-view "map")
+    (render-state [this {:keys [start-ts-ch end-ts-ch]}]
+      (app-view (om/build map-view
                           (get-in stage [user id br])
                           {:init-state {:start-ts-ch start-ts-ch
-                                        :end-ts-ch end-ts-ch
-                                        :date-ch date-ch}})
-                start-ts-ch
-                end-ts-ch
-                date-ch))))
+                                        :end-ts-ch end-ts-ch}})))))
 
 
 (def eval-fn {'(fn replace [old params] params) (fn replace [old params] params)
@@ -240,21 +310,24 @@
   ;; some dummy state
   (add-watch (-> @stage :volatile :val-atom) :add-once
              (fn [k a o new]
-               (remove-watch a k)
-               (let [user (get-in @stage [:config :user])]
-                 (doseq [{:keys [lon lat meal-type start end]}
-                         [{:lon 8.485 :lat 49.455
-                           :meal-type :soup
-                           :start #inst "2014-06-15T09:00:00.000-00:00"
-                           :end #inst "2014-06-15T12:00:00.000-00:00"}
-                          {:lon 8.491 :lat 49.451 :meal-type :lunch
-                           :start #inst "2014-06-15T11:00:00.000-00:00"
-                           :end #inst "2014-06-15T16:00:00.000-00:00"}
-                          {:lon 8.494 :lat 49.458
-                           :meal-type :cake
-                           :start #inst "2014-06-15T18:00:00.000-00:00"
-                           :end #inst "2014-06-15T22:00:00.000-00:00"}]]
-                   (add-marker stage user lon lat meal-type start end))))))
+               (when (get-in new ["eve@polyc0l0r.net"
+                                  #uuid "98bac5ab-7e88-45c2-93e6-831654b9bff4"
+                                  "master"])
+                 (remove-watch a k)
+                 (let [user (get-in @stage [:config :user])]
+                   (go (doseq [{:keys [lon lat meal-type start end]}
+                               [{:lon 8.485 :lat 49.455
+                                 :meal-type :soup
+                                 :start #inst "2014-06-15T09:00:00.000-00:00"
+                                 :end #inst "2014-06-15T12:00:00.000-00:00"}
+                                {:lon 8.491 :lat 49.451 :meal-type :lunch
+                                 :start #inst "2014-06-15T11:00:00.000-00:00"
+                                 :end #inst "2014-06-15T16:00:00.000-00:00"}
+                                {:lon 8.494 :lat 49.458
+                                 :meal-type :cake
+                                 :start #inst "2014-06-15T18:00:00.000-00:00"
+                                 :end #inst "2014-06-15T22:00:00.000-00:00"}]]
+                         (<! (add-marker stage user lon lat meal-type start end)))))))))
 
 
 (comment
