@@ -9,7 +9,6 @@
 
   :dependencies [[org.clojure/clojure "1.6.0"]
                  [org.clojure/clojurescript "0.0-2234"]
-                 #_[org.clojure/core.async "0.1.0-SNAPSHOT"]
                  [org.clojure/core.cache "0.6.3"]
                  [org.clojure/core.memoize "0.5.6" :exclusions [org.clojure/core.cache]]
                  [org.clojure/core.async "0.1.303.0-886421-alpha"]

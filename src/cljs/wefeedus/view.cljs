@@ -19,8 +19,9 @@
 
 
 (em/deftemplate map-popup "popup.html"
-  [user]
-  ["#popup-user"] (ef/content (or user "foo")))
+  [user description]
+  ["#popup-user"] (ef/content user)
+  ["#popup-description"] (ef/content description))
 
 (deftemplate app-view "public/index.html" [map-comp]
   {[:#map] (substitute map-comp)
